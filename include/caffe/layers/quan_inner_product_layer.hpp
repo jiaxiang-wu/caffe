@@ -41,14 +41,17 @@ class QuanInnerProductLayer : public Layer<Dtype> {
   virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
 
-  int dim_codeword_; // number of dimensions of each codeword
-  int cnt_codeword_; // number of codewords in each subspace
+  int num_codeword_;  // number of codewords in each sub-codebook
+  int len_codeword_;  // length of each codeword
+  int num_codebook_;  // number of sub-codebooks
   int M_;  // number of samples within the mini-batch
   int K_;  // number of input dimensions
   int N_;  // number of output dimensions
   bool bias_term_;  // whether the bias term exists
   Blob<Dtype> bias_multiplier_;  // use multiplication to add biases
-  bool transpose_;  // whether the weighting matrix is transposed
+
+  Blob<Dtype> lkup_tbl_;  // look-up table of inner products
+  vector<vector<vector<int> > > sspc_idxs_;  // set of subspace indices
 };
 
 }  // namespace caffe

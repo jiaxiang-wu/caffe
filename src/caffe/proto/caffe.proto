@@ -941,14 +941,9 @@ message QuanInnerProductParameter {
   // all preceding axes are retained in the output.
   // May be negative to index from the end (e.g., -1 for the last axis).
   optional int32 axis = 5 [default = 1];
-  // Specify whether to transpose the weight matrix or not.
-  // If transpose == true, any operations will be performed on the transpose
-  // of the weight matrix. The weight matrix itself is not going to be transposed
-  // but rather the transfer flag of operations will be toggled accordingly.
-  optional bool transpose = 6 [default = false];
 
-  optional uint32 dim_codeword = 7; // number of dimensions in each codeword
-  optional uint32 cnt_codeword = 8; // number of codewords in each subspace
+  optional uint32 num_codeword = 6; // number of codewords in each sub-codebook
+  optional uint32 len_codeword = 7; // length of each codeword
 }
 
 // Message that stores parameters used by RecurrentLayer
