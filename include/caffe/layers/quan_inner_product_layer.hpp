@@ -49,6 +49,8 @@ class QuanInnerProductLayer : public Layer<Dtype> {
   int N_;  // number of output dimensions
   bool bias_term_;  // whether the bias term exists
   Blob<Dtype> bias_multiplier_;  // use multiplication to add biases
+
+  Blob<Dtype> lkup_tbl_;  // look-up table of pre-computed inner products
 };
 
 }  // namespace caffe
