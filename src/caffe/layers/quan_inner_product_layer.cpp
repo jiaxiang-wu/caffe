@@ -132,7 +132,7 @@ void QuanInnerProductLayer<Dtype>::Reshape(
 template <typename Dtype>
 void QuanInnerProductLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  // Tranpose the input blob to the shape of <D_i x N>
+  // Tranpose the input blob into the <D x N> shape
   MatrixTranspose(bottom[0]->mutable_cpu_data(), M_, K_);
 
   // Compute the layer response, from <D_i x N> to <D_o x N>
@@ -158,7 +158,7 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
     quan_ind_sel += N_;
   }
 
-  // Tranpose the output blob to the shape of <N x D_o>
+  // Tranpose input/output blobs into the <N x D> shape
   MatrixTranspose(bottom[0]->mutable_cpu_data(), K_, M_);
   MatrixTranspose(top[0]->mutable_cpu_data(), N_, M_);
 
@@ -175,53 +175,51 @@ template <typename Dtype>
 void QuanInnerProductLayer<Dtype>::Backward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
-  // Reset the gradient signal of the set of codebooks and the layer input
-  if (this->param_propagate_down_[0]) {
-    caffe_set(this->blobs_[0]->count(), 
-        (Dtype)0., this->blobs_[0]->mutable_cpu_diff());
-  }
-  if (propagate_down[0]) {
-    caffe_set(bottom[0]->count(), (Dtype)0., bottom[0]->mutable_cpu_diff());
-  }
+  // Tranpose input/output blobs into the <D x N> shape
+  MatrixTranspose(bottom[0]->mutable_cpu_data(), M_, K_);
+  MatrixTranspose(top[0]->mutable_cpu_diff(), M_, N_);
 
-  // Compute the gradient signal for one instance at a time
-  Dtype lkup_tbl_vec[num_word_];
-  for (int m = 0; m < M_; m++) {
-    // Compute the gradient signal for one subspace at a time
-    const Dtype* bottom_data = bottom[0]->cpu_data() + m * K_;
-    const Dtype* top_diff = top[0]->cpu_diff() + m * N_;
-    const Dtype* scbk_data_sel = this->blobs_[0]->cpu_data();
-    const int* quan_ind_vec = (int*)(this->blobs_[1]->cpu_data());
-    Dtype* scbk_diff_sel = this->blobs_[0]->mutable_cpu_diff();
-    Dtype* bottom_diff = bottom[0]->mutable_cpu_diff() + m * K_;
-    for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
-      // Compute the gradient signal of the look-up table
-      caffe_set(num_word_, (Dtype)0., lkup_tbl_vec);
-      for (int idx_output = 0; idx_output < N_; idx_output++) {
-        lkup_tbl_vec[quan_ind_vec[idx_output]] += top_diff[idx_output];
-      }
-
-      // Compute the gradient signal of the sub-codebook
-      if (this->param_propagate_down_[0]) {
-        caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_word_, len_word_,
-            1, (Dtype)1., lkup_tbl_vec, bottom_data, (Dtype)1., scbk_diff_sel);
-      }
-
-      // Compute the gradient signal of the layer input
-      if (propagate_down[0]) {
-        caffe_cpu_gemv<Dtype>(CblasTrans, num_word_, len_word_, (Dtype)1.0,
-            scbk_data_sel, lkup_tbl_vec, (Dtype)0., bottom_diff);
-      }
-
-      // move pointers to the next subspace
-      bottom_data += len_word_;
-      scbk_data_sel += num_word_ * len_word_;
-      quan_ind_vec += N_;
-      scbk_diff_sel += num_word_ * len_word_;
-      bottom_diff += len_word_;
+  // Compute the gradient signal for set of sub-codebooks and layer input
+  const Dtype* bottom_data = bottom[0]->cpu_data();
+  const Dtype* top_diff = top[0]->cpu_diff();
+  const Dtype* scbk_data_sel = this->blobs_[0]->cpu_data();
+  const int* quan_ind_sel = (int*)(this->blobs_[1]->cpu_data());
+  Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
+  Dtype* scbk_diff_sel = this->blobs_[0]->mutable_cpu_diff();
+  for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
+    // Compute the gradient signal of the look-up table
+    caffe_set(lkup_tbl_.count(), (Dtype)0., lkup_tbl_.mutable_cpu_diff());
+    for (int idx_output = 0; idx_output < N_; idx_output++) {
+      int idx_word = quan_ind_sel[idx_output];
+      caffe_axpy<Dtype>(M_, (Dtype)1., top_diff + idx_output * M_,
+          lkup_tbl_.mutable_cpu_diff() + idx_word * M_);
     }
+    quan_ind_sel += N_;
+
+    // Compute the gradient signal of the sub-codebook
+    if (this->param_propagate_down_[0]) {
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, 
+          num_word_, len_word_, M_, (Dtype)1.,
+          lkup_tbl_.cpu_diff(), bottom_data, (Dtype)0., scbk_diff_sel);
+    }
+    bottom_data += len_word_ * M_;
+    scbk_diff_sel += num_word_ * len_word_;
+
+    // Compute the gradient signal of the layer input
+    if (propagate_down[0]) {
+      caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
+          len_word_, M_, num_word_, (Dtype)1.,
+          scbk_data_sel, lkup_tbl_.cpu_diff(), (Dtype)0., bottom_diff);
+    }
+    bottom_diff += len_word_ * M_;
+    scbk_data_sel += num_word_ * len_word_;
   }
 
+  // Tranpose input/output blobs into the <N x D> shape
+  MatrixTranspose(bottom[0]->mutable_cpu_data(), K_, M_);
+  MatrixTranspose(bottom[0]->mutable_cpu_diff(), K_, M_);
+  MatrixTranspose(top[0]->mutable_cpu_diff(), N_, M_);
+  
   // If necessary, compute the gradient signal of the bias term
   if (bias_term_ && this->param_propagate_down_[2]) {
     const Dtype* top_diff = top[0]->cpu_diff();
