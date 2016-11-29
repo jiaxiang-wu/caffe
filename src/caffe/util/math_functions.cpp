@@ -46,6 +46,58 @@ void caffe_cpu_gemv<double>(const CBLAS_TRANSPOSE TransA, const int M,
 }
 
 template <>
+void caffe_cpu_csrmm<float>(const CBLAS_TRANSPOSE TransA,
+    const MKL_INT M, const MKL_INT N, const MKL_INT K, const float alpha,
+    const float* val, const MKL_INT* indx, const MKL_INT* pntrb,
+    const MKL_INT* pntre, const float* B, const float beta, float* C) {
+  const char transa = (TransA == CblasNoTrans) ? 'N' : 'T';
+  const char matdescra[] = "G__C";
+  MKL_INT ldb = N;
+  MKL_INT ldc = N;
+  mkl_scsrmm(&transa, &M, &N, &K,
+      &alpha, matdescra, val, indx, pntrb, pntre, B, &ldb, &beta, C, &ldc);
+}
+
+template <>
+void caffe_cpu_csrmm<double>(const CBLAS_TRANSPOSE TransA,
+    const MKL_INT M, const MKL_INT N, const MKL_INT K, const double alpha,
+    const double* val, const MKL_INT* indx, const MKL_INT* pntrb,
+    const MKL_INT* pntre, const double* B, const double beta, double* C) {
+  const char transa = (TransA == CblasNoTrans) ? 'N' : 'T';
+  const char matdescra[] = "G__C";
+  MKL_INT ldb = N;
+  MKL_INT ldc = N;
+  mkl_dcsrmm(&transa, &M, &N, &K,
+      &alpha, matdescra, val, indx, pntrb, pntre, B, &ldb, &beta, C, &ldc);
+}
+
+template <>
+void caffe_cpu_bsrmm<float>(const CBLAS_TRANSPOSE TransA, const MKL_INT M,
+    const MKL_INT N, const MKL_INT K, const MKL_INT LB, const float alpha,
+    const float* val, const MKL_INT* indx, const MKL_INT* pntrb,
+    const MKL_INT* pntre, const float* B, const float beta, float* C) {
+  const char transa = (TransA == CblasNoTrans) ? 'N' : 'T';
+  const char matdescra[] = "G__C";
+  MKL_INT ldb = N;
+  MKL_INT ldc = N;
+  mkl_sbsrmm(&transa, &M, &N, &K, &LB,
+      &alpha, matdescra, val, indx, pntrb, pntre, B, &ldb, &beta, C, &ldc);
+}
+
+template <>
+void caffe_cpu_bsrmm<double>(const CBLAS_TRANSPOSE TransA, const MKL_INT M,
+    const MKL_INT N, const MKL_INT K, const MKL_INT LB, const double alpha,
+    const double* val, const MKL_INT* indx, const MKL_INT* pntrb,
+    const MKL_INT* pntre, const double* B, const double beta, double* C) {
+  const char transa = (TransA == CblasNoTrans) ? 'N' : 'T';
+  const char matdescra[] = "G__C";
+  MKL_INT ldb = N;
+  MKL_INT ldc = N;
+  mkl_dbsrmm(&transa, &M, &N, &K, &LB,
+      &alpha, matdescra, val, indx, pntrb, pntre, B, &ldb, &beta, C, &ldc);
+}
+
+template <>
 void caffe_axpy<float>(const int N, const float alpha, const float* X,
     float* Y) { cblas_saxpy(N, alpha, X, 1, Y, 1); }
 
