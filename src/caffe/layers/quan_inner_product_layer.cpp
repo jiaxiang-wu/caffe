@@ -7,15 +7,29 @@
 namespace caffe {
 
 template <typename Dtype>
-void MatrixTranspose(Dtype* arr, int num_rows, int num_cols) {
-  vector<bool> marker(num_rows * num_cols, false);
+void QuanInnerProductLayer<Dtype>::MatrixTranspose_cpu(
+    Dtype* arr, int num_rows, int num_cols) {
+  Dtype* buf = trans_buf_.mutable_cpu_data();
+  caffe_copy(num_rows * num_cols, arr, buf);
+  for (int idx_col = 0; idx_col < num_cols; idx_col++) {
+    const Dtype* src = buf + idx_col;
+    Dtype* dst = arr + idx_col * num_rows;
+    for (int idx_row = 0; idx_row < num_rows; idx_row++) {
+      dst[idx_row] = src[idx_row * num_cols];
+    }
+  }
+
+  /*
+  Blob<bool> marker(num_rows, num_cols, 1, 1);
+  caffe_set(marker.count(), false, marker.mutable_cpu_data());
+  bool* marker_vec = marker.mutable_cpu_data();
   int mod_factor = num_rows * num_cols - 1;
   for (int idx = 1; idx < mod_factor; ) {  // skip the first & last elements
     int idxBegn = idx;
-    marker[idxBegn] = true;
+    marker_vec[idxBegn] = true;
     while (true) {
       int idxNext = (idx * num_cols) % mod_factor;
-      marker[idxNext] = true;
+      marker_vec[idxNext] = true;
       if (idxNext == idxBegn) {
         break;
       } else {
@@ -25,8 +39,9 @@ void MatrixTranspose(Dtype* arr, int num_rows, int num_cols) {
         idx = idxNext;
       }
     }
-    for (idx = idxBegn + 1; idx < mod_factor && marker[idx]; idx++) ;
+    for (idx = idxBegn + 1; idx < mod_factor && marker_vec[idx]; idx++) ;
   }
+  */
 }
 
 template <typename Dtype>
@@ -127,13 +142,19 @@ void QuanInnerProductLayer<Dtype>::Reshape(
   lkup_tbl_shape[0] = num_word_;
   lkup_tbl_shape[1] = M_;
   lkup_tbl_.Reshape(lkup_tbl_shape);
+
+  // Create a memory buffer for the matrix transposition
+  vector<int> trans_buf_shape(2);
+  trans_buf_shape[0] = M_;
+  trans_buf_shape[1] = (N_ > K_) ? N_ : K_;
+  trans_buf_.Reshape(trans_buf_shape);
 }
 
 template <typename Dtype>
 void QuanInnerProductLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   // Tranpose the input blob into the <D x N> shape
-  MatrixTranspose(bottom[0]->mutable_cpu_data(), M_, K_);
+  MatrixTranspose_cpu(bottom[0]->mutable_cpu_data(), M_, K_);
 
   // Compute the layer response, from <D_i x N> to <D_o x N>
   const Dtype* bottom_data = bottom[0]->cpu_data();
@@ -159,8 +180,8 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
   }
 
   // Tranpose input/output blobs into the <N x D> shape
-  MatrixTranspose(bottom[0]->mutable_cpu_data(), K_, M_);
-  MatrixTranspose(top[0]->mutable_cpu_data(), N_, M_);
+  MatrixTranspose_cpu(bottom[0]->mutable_cpu_data(), K_, M_);
+  MatrixTranspose_cpu(top[0]->mutable_cpu_data(), N_, M_);
 
   // If necessary, add the bias term
   if (bias_term_) {
@@ -176,8 +197,8 @@ void QuanInnerProductLayer<Dtype>::Backward_cpu(
     const vector<Blob<Dtype>*>& top, const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
   // Tranpose input/output blobs into the <D x N> shape
-  MatrixTranspose(bottom[0]->mutable_cpu_data(), M_, K_);
-  MatrixTranspose(top[0]->mutable_cpu_diff(), M_, N_);
+  MatrixTranspose_cpu(bottom[0]->mutable_cpu_data(), M_, K_);
+  MatrixTranspose_cpu(top[0]->mutable_cpu_diff(), M_, N_);
 
   // Compute the gradient signal for set of sub-codebooks and layer input
   const Dtype* bottom_data = bottom[0]->cpu_data();
@@ -216,9 +237,9 @@ void QuanInnerProductLayer<Dtype>::Backward_cpu(
   }
 
   // Tranpose input/output blobs into the <N x D> shape
-  MatrixTranspose(bottom[0]->mutable_cpu_data(), K_, M_);
-  MatrixTranspose(bottom[0]->mutable_cpu_diff(), K_, M_);
-  MatrixTranspose(top[0]->mutable_cpu_diff(), N_, M_);
+  MatrixTranspose_cpu(bottom[0]->mutable_cpu_data(), K_, M_);
+  MatrixTranspose_cpu(bottom[0]->mutable_cpu_diff(), K_, M_);
+  MatrixTranspose_cpu(top[0]->mutable_cpu_diff(), N_, M_);
   
   // If necessary, compute the gradient signal of the bias term
   if (bias_term_ && this->param_propagate_down_[2]) {

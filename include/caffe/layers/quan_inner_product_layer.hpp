@@ -51,6 +51,11 @@ class QuanInnerProductLayer : public Layer<Dtype> {
   Blob<Dtype> bias_multiplier_;  // use multiplication to add biases
 
   Blob<Dtype> lkup_tbl_;  // look-up table of pre-computed inner products
+  Blob<Dtype> trans_buf_;  // memory buffer for the matrix transposition
+
+ private:
+  void MatrixTranspose_cpu(Dtype* arr, int num_rows, int num_cols);
+  void MatrixTranspose_gpu(Dtype* arr, int num_rows, int num_cols);
 };
 
 }  // namespace caffe
