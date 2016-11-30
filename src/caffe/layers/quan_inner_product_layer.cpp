@@ -161,9 +161,10 @@ void QuanInnerProductLayer<Dtype>::Reshape(
   }
 
   // Create a look-up table to store pre-computed inner products
-  vector<int> lkup_tbl_shape(2);
-  lkup_tbl_shape[0] = num_word_;
-  lkup_tbl_shape[1] = M_;
+  vector<int> lkup_tbl_shape(3);
+  lkup_tbl_shape[0] = 1;
+  lkup_tbl_shape[1] = num_word_;
+  lkup_tbl_shape[2] = M_;
   lkup_tbl_.Reshape(lkup_tbl_shape);
 
   // Create a memory buffer for the matrix transposition
