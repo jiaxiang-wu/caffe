@@ -26,18 +26,6 @@ void caffe_cpu_gemv(const CBLAS_TRANSPOSE TransA, const int M, const int N,
     Dtype* y);
 
 template <typename Dtype>
-void caffe_cpu_csrmm(const CBLAS_TRANSPOSE TransA,
-    const MKL_INT M, const MKL_INT N, const MKL_INT K, const Dtype alpha,
-    const Dtype* val, const MKL_INT* indx, const MKL_INT* pntrb,
-    const MKL_INT* pntre, const Dtype* B, const Dtype beta, Dtype* C);
-
-template <typename Dtype>
-void caffe_cpu_bsrmm(const CBLAS_TRANSPOSE TransA, const MKL_INT M,
-    const MKL_INT N, const MKL_INT K, const MKL_INT LB, const Dtype alpha,
-    const Dtype* val, const MKL_INT* indx, const MKL_INT* pntrb,
-    const MKL_INT* pntre, const Dtype* B, const Dtype beta, Dtype* C);
-
-template <typename Dtype>
 void caffe_axpy(const int N, const Dtype alpha, const Dtype* X,
     Dtype* Y);
 

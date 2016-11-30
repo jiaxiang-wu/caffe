@@ -138,13 +138,13 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
   const Dtype* bottom_data = bottom[0]->cpu_data();
   const Dtype* scbk_sel = this->blobs_[0]->cpu_data();
   const int* quan_ind_sel = (int*)(this->blobs_[1]->cpu_data());
+  Dtype* lkup_tbl_data = lkup_tbl_.mutable_cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
   caffe_set(top[0]->count(), (Dtype)0., top[0]->mutable_cpu_data());
   for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
     // STAGE #1: inner product pre-computation
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
-        num_word_, M_, len_word_, (Dtype)1., scbk_sel, bottom_data,
-        (Dtype)0., lkup_tbl_.mutable_cpu_data());
+    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_word_, M_, len_word_,
+        (Dtype)1., scbk_sel, bottom_data, (Dtype)0., lkup_tbl_data);
     bottom_data += len_word_ * M_;
     scbk_sel += num_word_ * len_word_;
 
@@ -152,7 +152,7 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
     for (int idx_output = 0; idx_output < N_; idx_output++) {
       int idx_word = quan_ind_sel[idx_output];
       caffe_axpy<Dtype>(M_, (Dtype)1.,
-          lkup_tbl_.cpu_data() + idx_word * M_, top_data + idx_output * M_);
+          lkup_tbl_data + idx_word * M_, top_data + idx_output * M_);
     }
     quan_ind_sel += N_;
   }
@@ -185,30 +185,29 @@ void QuanInnerProductLayer<Dtype>::Backward_cpu(
   const int* quan_ind_sel = (int*)(this->blobs_[1]->cpu_data());
   Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
   Dtype* scbk_diff_sel = this->blobs_[0]->mutable_cpu_diff();
+  Dtype* lkup_tbl_diff = lkup_tbl_.mutable_cpu_diff();
   for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
     // Compute the gradient signal of the look-up table
     caffe_set(lkup_tbl_.count(), (Dtype)0., lkup_tbl_.mutable_cpu_diff());
     for (int idx_output = 0; idx_output < N_; idx_output++) {
       int idx_word = quan_ind_sel[idx_output];
-      caffe_axpy<Dtype>(M_, (Dtype)1., top_diff + idx_output * M_,
-          lkup_tbl_.mutable_cpu_diff() + idx_word * M_);
+      caffe_axpy<Dtype>(M_, (Dtype)1.,
+          top_diff + idx_output * M_, lkup_tbl_diff + idx_word * M_);
     }
     quan_ind_sel += N_;
 
     // Compute the gradient signal of the sub-codebook
     if (this->param_propagate_down_[0]) {
-      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans,
-          num_word_, len_word_, M_, (Dtype)1.,
-          lkup_tbl_.cpu_diff(), bottom_data, (Dtype)0., scbk_diff_sel);
+      caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, num_word_, len_word_, M_,
+          (Dtype)1., lkup_tbl_diff, bottom_data, (Dtype)0., scbk_diff_sel);
     }
     bottom_data += len_word_ * M_;
     scbk_diff_sel += num_word_ * len_word_;
 
     // Compute the gradient signal of the layer input
     if (propagate_down[0]) {
-      caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
-          len_word_, M_, num_word_, (Dtype)1.,
-          scbk_data_sel, lkup_tbl_.cpu_diff(), (Dtype)0., bottom_diff);
+      caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, len_word_, M_, num_word_,
+          (Dtype)1., scbk_data_sel, lkup_tbl_diff, (Dtype)0., bottom_diff);
     }
     bottom_diff += len_word_ * M_;
     scbk_data_sel += num_word_ * len_word_;

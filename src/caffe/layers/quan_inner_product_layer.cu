@@ -35,16 +35,14 @@ void QuanInnerProductLayer<Dtype>::MatrixTranspose_gpu(
 }
 
 template <typename Dtype>
-__global__ void Forward_gpu_kernel(const int n, const Dtype* lkup_tbl, 
-    const int* quan_ind_sel, Dtype* top_data, const int M_) {
+__global__ void Forward_gpu_kernel(const int n,
+    const int num_output, const int num_smpl,
+    const Dtype* lkup_tbl, const int* quan_ind, Dtype* top_data) {
   CUDA_KERNEL_LOOP(index, n) {
-    int idx_output = index;
-    int idx_word = quan_ind_sel[idx_output];
-    const Dtype* lkup_tbl_sel = lkup_tbl + idx_word * M_;
-    Dtype* top_data_sel = top_data + idx_output * M_;
-    for (int m = 0; m < M_; m++) {
-      top_data_sel[m] += lkup_tbl_sel[m];
-    }
+    int idx_output = index / num_smpl;
+    int idx_smpl = index % num_smpl;
+    int idx_word = quan_ind[idx_output];
+    top_data[index] += lkup_tbl[idx_word * num_smpl + idx_smpl];
   }
 }
 
@@ -58,21 +56,21 @@ void QuanInnerProductLayer<Dtype>::Forward_gpu(
   const Dtype* bottom_data = bottom[0]->gpu_data();
   const Dtype* scbk_sel = this->blobs_[0]->gpu_data();
   const int* quan_ind_sel = (int*)(this->blobs_[1]->gpu_data());
+  Dtype* lkup_tbl_data = lkup_tbl_.mutable_gpu_data();
   Dtype* top_data = top[0]->mutable_gpu_data();
   caffe_gpu_set(top[0]->count(), (Dtype)0., top[0]->mutable_gpu_data());
   for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
     // STAGE #1: inner product pre-computation
-    caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, 
-        num_word_, M_, len_word_, (Dtype)1., scbk_sel, bottom_data,
-        (Dtype)0., lkup_tbl_.mutable_gpu_data());
+    caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_word_, M_, len_word_,
+        (Dtype)1., scbk_sel, bottom_data, (Dtype)0., lkup_tbl_data);
     bottom_data += len_word_ * M_;
     scbk_sel += num_word_ * len_word_;
 
     // STAGE #2: approximate layer response computation
-    int num_kernels = N_;
+    int num_kernels = N_ * M_;
     Forward_gpu_kernel<Dtype><<<CAFFE_GET_BLOCKS(num_kernels),
                                 CAFFE_CUDA_NUM_THREADS>>>(
-        num_kernels, lkup_tbl_.gpu_data(), quan_ind_sel, top_data, M_);
+        num_kernels, N_, M_, lkup_tbl_data, quan_ind_sel, top_data);
     CUDA_POST_KERNEL_CHECK;
     quan_ind_sel += N_;
   }
@@ -91,20 +89,20 @@ void QuanInnerProductLayer<Dtype>::Forward_gpu(
 }
 
 template <typename Dtype>
-__global__ void Backward_gpu_kernel(const int n, const Dtype* top_diff, 
-    const int* quan_ind_sel, Dtype* lkup_tbl, const int N_, const int M_) {
+__global__ void Backward_gpu_kernel(const int n,
+    const int num_output, const int num_smpl,
+    const Dtype* top_diff, const int* quan_ind, Dtype* lkup_tbl) {
   CUDA_KERNEL_LOOP(index, n) {
-    int idx_word = index;
-    const Dtype* top_diff_sel = top_diff;
-    Dtype* lkup_tbl_sel = lkup_tbl + idx_word * M_;
-    for (int idx_output = 0; idx_output < N_; idx_output++) {
-      if (quan_ind_sel[idx_output] == idx_word) {
-        for (int m = 0; m < M_; m++) {
-          lkup_tbl_sel[m] += top_diff_sel[m];
-        }
+    int idx_word = index / num_smpl;
+    int idx_smpl = index % num_smpl;
+    const Dtype* top_diff_sel = top_diff + idx_smpl * num_output;
+    Dtype sum = (Dtype)0.;
+    for (int idx_output = 0; idx_output < num_output; idx_output++) {
+      if (quan_ind[idx_output] == idx_word) {
+        sum += top_diff_sel[idx_output];
       }
-      top_diff_sel += M_;
     }
+    lkup_tbl[index] += sum;
   }
 }
 
@@ -114,7 +112,6 @@ void QuanInnerProductLayer<Dtype>::Backward_gpu(
     const vector<Blob<Dtype>*>& bottom) {
   // Tranpose input/output blobs into the <D x N> shape
   MatrixTranspose_gpu(bottom[0]->mutable_gpu_data(), M_, K_);
-  MatrixTranspose_gpu(top[0]->mutable_gpu_diff(), M_, N_);
 
   // Compute the gradient signal for set of sub-codebooks and layer input
   const Dtype* bottom_data = bottom[0]->gpu_data();
@@ -123,31 +120,29 @@ void QuanInnerProductLayer<Dtype>::Backward_gpu(
   const int* quan_ind_sel = (int*)(this->blobs_[1]->gpu_data());
   Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
   Dtype* scbk_diff_sel = this->blobs_[0]->mutable_gpu_diff();
+  Dtype* lkup_tbl_diff = lkup_tbl_.mutable_gpu_diff();
   for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
     // Compute the gradient signal of the look-up table
-    caffe_gpu_set(lkup_tbl_.count(), (Dtype)0., lkup_tbl_.mutable_gpu_diff());
-    int num_kernels = num_word_;
+    int num_kernels = num_word_ * M_;
+    caffe_gpu_set(lkup_tbl_.count(), (Dtype)0., lkup_tbl_diff);
     Backward_gpu_kernel<Dtype><<<CAFFE_GET_BLOCKS(num_kernels),
                                  CAFFE_CUDA_NUM_THREADS>>>(
-        num_kernels, top_diff, quan_ind_sel, 
-        lkup_tbl_.mutable_gpu_diff(), N_, M_);
+        num_kernels, N_, M_, top_diff, quan_ind_sel, lkup_tbl_diff);
     CUDA_POST_KERNEL_CHECK;
     quan_ind_sel += N_;
 
     // Compute the gradient signal of the sub-codebook
     if (this->param_propagate_down_[0]) {
-      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasTrans, 
-          num_word_, len_word_, M_, (Dtype)1.,
-          lkup_tbl_.gpu_diff(), bottom_data, (Dtype)0., scbk_diff_sel);
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasTrans, num_word_, len_word_, M_,
+          (Dtype)1., lkup_tbl_diff, bottom_data, (Dtype)0., scbk_diff_sel);
     }
     bottom_data += len_word_ * M_;
     scbk_diff_sel += num_word_ * len_word_;
 
     // Compute the gradient signal of the layer input
     if (propagate_down[0]) {
-      caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
-          len_word_, M_, num_word_, (Dtype)1.,
-          scbk_data_sel, lkup_tbl_.gpu_diff(), (Dtype)0., bottom_diff);
+      caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans, len_word_, M_, num_word_,
+          (Dtype)1., scbk_data_sel, lkup_tbl_diff, (Dtype)0., bottom_diff);
     }
     bottom_diff += len_word_ * M_;
     scbk_data_sel += num_word_ * len_word_;
@@ -156,7 +151,6 @@ void QuanInnerProductLayer<Dtype>::Backward_gpu(
   // Tranpose input/output blobs into the <N x D> shape
   MatrixTranspose_gpu(bottom[0]->mutable_gpu_data(), K_, M_);
   MatrixTranspose_gpu(bottom[0]->mutable_gpu_diff(), K_, M_);
-  MatrixTranspose_gpu(top[0]->mutable_gpu_diff(), N_, M_);
 
   // If necessary, compute the gradient signal of the bias term
   if (bias_term_ && this->param_propagate_down_[2]) {
