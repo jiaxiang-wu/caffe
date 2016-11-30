@@ -83,53 +83,6 @@ void QuanInnerProductLayer<Dtype>::LayerSetUp(
   // Specify whether the diff of each param blob should be computed
   this->param_propagate_down_.resize(this->blobs_.size(), true);
   this->param_propagate_down_[1] = false;  // skip for quantization indicators
-
-  // Convert the set of quantization indicators into a sparse matrix
-  // Matrix's size:    N_ * (num_scbk_ * num_word_)
-  // # of nnz entries: N_ * num_scbk_
-  mapp_mat_.val->Reshape(vector<int>(1, N_ * num_scbk_));
-  mapp_mat_.indx->Reshape(vector<int>(1, N_ * num_scbk_));
-  mapp_mat_.pntrb->Reshape(vector<int>(1, N_));
-  mapp_mat_.pntre->Reshape(vector<int>(1, N_));
-  caffe_set(N_ * num_scbk_, (Dtype)1., mapp_mat_.val->mutable_cpu_data());
-  MKL_INT* pntrb = mapp_mat_.pntrb->mutable_cpu_data();
-  MKL_INT* pntre = mapp_mat_.pntre->mutable_cpu_data();
-  for (int idx_output = 0; idx_output < N_; idx_output++) {
-    const int* quan_ind =
-        reinterpret_cast<const int*>(this->blobs_[1]->cpu_data()) + idx_output;
-    MKL_INT* indx = mapp_mat_.indx->mutable_cpu_data() + num_scbk_;
-    for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
-      int idx_word = quan_ind[idx_scbk * N_];
-      indx[idx_scbk] = idx_scbk * num_word_ + idx_word;
-    }
-    pntrb[idx_output] = idx_output * num_scbk_;
-    pntre[idx_output] = pntrb[idx_output] + num_scbk_;
-  }
-
-  // Convert each group of quantization indicators into a sparse matrix
-  // # of matrices:    num_scbk_
-  // Matrix's size:    N_ * num_word_
-  // # of nnz entries: N_
-  mapp_mats_.resize(num_scbk_);
-  for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
-    SpMat<Dtype>& mapp_mat = mapp_mats_[idx_scbk];
-    mapp_mat.val->Reshape(vector<int>(1, N_));
-    mapp_mat.indx->Reshape(vector<int>(1, N_));
-    mapp_mat.pntrb->Reshape(vector<int>(1, N_));
-    mapp_mat.pntre->Reshape(vector<int>(1, N_));
-
-    const int* quan_ind = idx_scbk * N_ +
-        reinterpret_cast<const int*>(this->blobs_[1]->cpu_data());
-    MKL_INT* indx = mapp_mat.indx->mutable_cpu_data();
-    MKL_INT* pntrb = mapp_mat.pntrb->mutable_cpu_data();
-    MKL_INT* pntre = mapp_mat.pntre->mutable_cpu_data();
-    caffe_set(N_, (Dtype)1., mapp_mat.val->mutable_cpu_data());
-    for (int idx_output = 0; idx_output < N_; idx_output++) {
-      indx[idx_output] = quan_ind[idx_output];
-      pntrb[idx_output] = idx_output;
-      pntre[idx_output] = idx_output + 1;
-    }
-  }
 }
 
 template <typename Dtype>
@@ -203,48 +156,6 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
     }
     quan_ind_sel += N_;
   }
-
-  /*
-  // SCHEME #2: single sparse matrix
-  // Compute the layer response, from <D_i x N> to <D_o x N>
-  const Dtype* bottom_data = bottom[0]->cpu_data();
-  const Dtype* scbk_sel = this->blobs_[0]->cpu_data();
-  Dtype* lkup_tbl_sel = lkup_tbl_.mutable_cpu_data();
-  for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_word_, M_,
-        len_word_, (Dtype)1., scbk_sel, bottom_data, (Dtype)0., lkup_tbl_sel);
-    bottom_data += len_word_ * M_;
-    scbk_sel += num_word_ * len_word_;
-    lkup_tbl_sel += num_word_ * M_;
-  }
-  caffe_cpu_csrmm<Dtype>(CblasNoTrans, N_, M_, num_scbk_ * num_word_,
-      (Dtype)1., mapp_mat_.val->cpu_data(), mapp_mat_.indx->cpu_data(),
-      mapp_mat_.pntrb->cpu_data(), mapp_mat_.pntre->cpu_data(),
-      lkup_tbl_.cpu_data(), (Dtype)0., top[0]->mutable_cpu_data());
-  */
-
-  /*
-  // SCHEME #3: multiple sparse matrices
-  // Compute the layer response, from <D_i x N> to <D_o x N>
-  const Dtype* bottom_data = bottom[0]->cpu_data();
-  const Dtype* scbk_sel = this->blobs_[0]->cpu_data();
-  caffe_set(top[0]->count(), (Dtype)0., top[0]->mutable_cpu_data());
-  for (int idx_scbk = 0; idx_scbk < num_scbk_; idx_scbk++) {
-    // STAGE #1: inner product pre-computation
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
-        num_word_, M_, len_word_, (Dtype)1., scbk_sel, bottom_data,
-        (Dtype)0., lkup_tbl_.mutable_cpu_data());
-    bottom_data += len_word_ * M_;
-    scbk_sel += num_word_ * len_word_;
-
-    // STAGE #2: approximate layer response computation
-    const SpMat<Dtype>& mapp_mat = mapp_mats_[idx_scbk];
-    caffe_cpu_csrmm<Dtype>(CblasNoTrans, N_, M_, num_word_, (Dtype)1.,
-        mapp_mat.val->cpu_data(), mapp_mat.indx->cpu_data(),
-        mapp_mat.pntrb->cpu_data(), mapp_mat.pntre->cpu_data(),
-        lkup_tbl_.cpu_data(), (Dtype)1., top[0]->mutable_cpu_data());
-  }
-  */
 
   // Tranpose input/output blobs into the <N x D> shape
   MatrixTranspose_cpu(bottom[0]->mutable_cpu_data(), K_, M_);

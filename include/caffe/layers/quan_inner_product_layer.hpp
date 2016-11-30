@@ -9,21 +9,6 @@
 
 namespace caffe {
 
-template <typename Dtype>
-struct SpMat {
-  shared_ptr<Blob<Dtype> > val;
-  shared_ptr<Blob<MKL_INT> > indx;
-  shared_ptr<Blob<MKL_INT> > pntrb;
-  shared_ptr<Blob<MKL_INT> > pntre;
-
-  SpMat(void) {
-    val.reset(new Blob<Dtype>());
-    indx.reset(new Blob<MKL_INT>());
-    pntrb.reset(new Blob<MKL_INT>());
-    pntre.reset(new Blob<MKL_INT>());
-  }
-};
-
 /**
  * @brief The parameter-quantized version of InnerProduct layer, also known as
  *        a "fully-connected" layer, computes an inner product with a set of
@@ -64,11 +49,8 @@ class QuanInnerProductLayer : public Layer<Dtype> {
   int N_;  // number of output dimensions
   bool bias_term_;  // whether the bias term exists
   Blob<Dtype> bias_multiplier_;  // use multiplication to add biases
-
   Blob<Dtype> lkup_tbl_;  // look-up table of pre-computed inner products
   Blob<Dtype> trans_buf_;  // memory buffer for the matrix transposition
-  SpMat<Dtype> mapp_mat_;  // quantization mapping matrix (CSR)
-  vector<SpMat<Dtype> > mapp_mats_;  // quantization mapping matrices (CSR)
 
  private:
   void MatrixTranspose_cpu(Dtype* arr, int num_rows, int num_cols);
