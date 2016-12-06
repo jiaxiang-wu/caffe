@@ -37,11 +37,11 @@ void QuanInnerProductLayer<Dtype>::MatrixTranspose_gpu(
 template <typename Dtype>
 __global__ void Forward_gpu_kernel(const int n,
     const int num_output, const int num_smpl,
-    const Dtype* lkup_tbl, const int* quan_ind, Dtype* top_data) {
+    const Dtype* lkup_tbl, const Dtype* quan_ind, Dtype* top_data) {
   CUDA_KERNEL_LOOP(index, n) {
     int idx_output = index / num_smpl;
     int idx_smpl = index % num_smpl;
-    int idx_word = quan_ind[idx_output];
+    int idx_word = static_cast<int>(quan_ind[idx_output] + 0.5);
     top_data[index] += lkup_tbl[idx_word * num_smpl + idx_smpl];
   }
 }
@@ -55,7 +55,7 @@ void QuanInnerProductLayer<Dtype>::Forward_gpu(
   // Compute the layer response, from <D_i x N> to <D_o x N>
   const Dtype* bottom_data = bottom[0]->gpu_data();
   const Dtype* scbk_sel = this->blobs_[0]->gpu_data();
-  const int* quan_ind_sel = (int*)(this->blobs_[1]->gpu_data());
+  const Dtype* quan_ind_sel = this->blobs_[1]->gpu_data();
   Dtype* lkup_tbl_data = lkup_tbl_.mutable_gpu_data();
   Dtype* top_data = top[0]->mutable_gpu_data();
   caffe_gpu_set(top[0]->count(), (Dtype)0., top[0]->mutable_gpu_data());
@@ -91,14 +91,14 @@ void QuanInnerProductLayer<Dtype>::Forward_gpu(
 template <typename Dtype>
 __global__ void Backward_gpu_kernel(const int n,
     const int num_output, const int num_smpl,
-    const Dtype* top_diff, const int* quan_ind, Dtype* lkup_tbl) {
+    const Dtype* top_diff, const Dtype* quan_ind, Dtype* lkup_tbl) {
   CUDA_KERNEL_LOOP(index, n) {
     int idx_word = index / num_smpl;
     int idx_smpl = index % num_smpl;
     const Dtype* top_diff_sel = top_diff + idx_smpl * num_output;
     Dtype sum = (Dtype)0.;
     for (int idx_output = 0; idx_output < num_output; idx_output++) {
-      if (quan_ind[idx_output] == idx_word) {
+      if (static_cast<int>(quan_ind[idx_output] + 0.5) == idx_word) {
         sum += top_diff_sel[idx_output];
       }
     }
@@ -117,7 +117,7 @@ void QuanInnerProductLayer<Dtype>::Backward_gpu(
   const Dtype* bottom_data = bottom[0]->gpu_data();
   const Dtype* top_diff = top[0]->gpu_diff();
   const Dtype* scbk_data_sel = this->blobs_[0]->gpu_data();
-  const int* quan_ind_sel = (int*)(this->blobs_[1]->gpu_data());
+  const Dtype* quan_ind_sel = this->blobs_[1]->gpu_data();
   Dtype* bottom_diff = bottom[0]->mutable_gpu_diff();
   Dtype* scbk_diff_sel = this->blobs_[0]->mutable_gpu_diff();
   Dtype* lkup_tbl_diff = lkup_tbl_.mutable_gpu_diff();

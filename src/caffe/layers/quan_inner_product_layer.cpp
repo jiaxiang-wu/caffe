@@ -65,9 +65,9 @@ void QuanInnerProductLayer<Dtype>::LayerSetUp(
     quan_ind_shape[1] = N_;
     this->blobs_[1].reset(new Blob<Dtype>(quan_ind_shape));
     // fill the set of quantization indicators
-    int* quan_ind = (int*)(this->blobs_[1]->mutable_cpu_data());
+    Dtype* quan_ind = this->blobs_[1]->mutable_cpu_data();
     for (int idx = 0; idx < this->blobs_[1]->count(); idx++) {
-      quan_ind[idx] = rand() % num_word_;
+      quan_ind[idx] = static_cast<Dtype>(rand() % num_word_);
     }
 
     // If necessary, intiialize and fill the bias term
@@ -137,7 +137,7 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
   // Compute the layer response, from <D_i x N> to <D_o x N>
   const Dtype* bottom_data = bottom[0]->cpu_data();
   const Dtype* scbk_sel = this->blobs_[0]->cpu_data();
-  const int* quan_ind_sel = (int*)(this->blobs_[1]->cpu_data());
+  const Dtype* quan_ind_sel = this->blobs_[1]->cpu_data();
   Dtype* lkup_tbl_data = lkup_tbl_.mutable_cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
   caffe_set(top[0]->count(), (Dtype)0., top[0]->mutable_cpu_data());
@@ -150,7 +150,7 @@ void QuanInnerProductLayer<Dtype>::Forward_cpu(
 
     // STAGE #2: approximate layer response computation
     for (int idx_output = 0; idx_output < N_; idx_output++) {
-      int idx_word = quan_ind_sel[idx_output];
+      int idx_word = static_cast<int>(quan_ind_sel[idx_output] + 0.5);
       caffe_axpy<Dtype>(M_, (Dtype)1.,
           lkup_tbl_data + idx_word * M_, top_data + idx_output * M_);
     }
@@ -182,7 +182,7 @@ void QuanInnerProductLayer<Dtype>::Backward_cpu(
   const Dtype* bottom_data = bottom[0]->cpu_data();
   const Dtype* top_diff = top[0]->cpu_diff();
   const Dtype* scbk_data_sel = this->blobs_[0]->cpu_data();
-  const int* quan_ind_sel = (int*)(this->blobs_[1]->cpu_data());
+  const Dtype* quan_ind_sel = this->blobs_[1]->cpu_data();
   Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
   Dtype* scbk_diff_sel = this->blobs_[0]->mutable_cpu_diff();
   Dtype* lkup_tbl_diff = lkup_tbl_.mutable_cpu_diff();
@@ -190,7 +190,7 @@ void QuanInnerProductLayer<Dtype>::Backward_cpu(
     // Compute the gradient signal of the look-up table
     caffe_set(lkup_tbl_.count(), (Dtype)0., lkup_tbl_.mutable_cpu_diff());
     for (int idx_output = 0; idx_output < N_; idx_output++) {
-      int idx_word = quan_ind_sel[idx_output];
+      int idx_word = static_cast<int>(quan_ind_sel[idx_output] + 0.5);
       caffe_axpy<Dtype>(M_, (Dtype)1.,
           top_diff + idx_output * M_, lkup_tbl_diff + idx_word * M_);
     }
